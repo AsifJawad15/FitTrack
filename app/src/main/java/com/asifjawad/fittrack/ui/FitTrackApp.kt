@@ -1,5 +1,6 @@
 package com.asifjawad.fittrack.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -41,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -48,7 +50,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.asifjawad.fittrack.data.health.HealthConnectAvailability
 import com.asifjawad.fittrack.domain.calculation.ProgressEngine
 import com.asifjawad.fittrack.domain.model.ActivityLevel
 import com.asifjawad.fittrack.domain.model.MealType
@@ -56,7 +60,10 @@ import com.asifjawad.fittrack.domain.model.Sex
 import com.asifjawad.fittrack.domain.model.UserProfile
 import com.asifjawad.fittrack.domain.model.UserProfileDraft
 import com.asifjawad.fittrack.ui.theme.FittrackTheme
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun FitTrackApp(
@@ -64,6 +71,15 @@ fun FitTrackApp(
 ) {
     val state = viewModel.uiState
     val profile = state.profile
+    val healthPermissionLauncher = rememberLauncherForActivityResult(
+        contract = PermissionController.createRequestPermissionResultContract()
+    ) {
+        viewModel.refreshHealthConnectStatus()
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshHealthConnectStatus()
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -122,7 +138,14 @@ fun FitTrackApp(
                         onSaveWeight = viewModel::addWeightLog,
                         onSaveWaist = viewModel::addWaistLog
                     )
-                    FitTrackTab.Health -> HealthScreen()
+                    FitTrackTab.Health -> HealthScreen(
+                        state = state,
+                        onRequestPermissions = {
+                            healthPermissionLauncher.launch(requiredHealthPermissions)
+                        },
+                        onRefresh = viewModel::refreshHealthConnectStatus,
+                        onSyncToday = viewModel::syncTodayHealthConnect
+                    )
                     FitTrackTab.Settings -> SettingsScreen(
                         draft = state.profileDraft,
                         error = state.profileError,
@@ -818,21 +841,103 @@ private fun ProgressScreen(
 }
 
 @Composable
-private fun HealthScreen() {
+private fun HealthScreen(
+    state: FitTrackUiState,
+    onRequestPermissions: () -> Unit,
+    onRefresh: () -> Unit,
+    onSyncToday: () -> Unit
+) {
+    val missingPermissions = requiredHealthPermissions.size - state.healthGrantedPermissions.size
+    val summary = state.healthSummary
+    val syncStatus = state.healthSyncStatus
+
     ScreenColumn {
         ScreenHeader(
             title = "Health",
-            subtitle = "Samsung Health data will arrive through Health Connect in Phase 5."
+            subtitle = "Read Samsung Health data through Android Health Connect."
         )
+
+        MetricGrid(
+            items = listOf(
+                "Availability" to state.healthAvailability.label,
+                "Permissions" to "${state.healthGrantedPermissions.size}/${requiredHealthPermissions.size}",
+                "Last sync" to (syncStatus?.lastSyncEpochMillis?.formatSyncTime() ?: "Never"),
+                "Status" to (syncStatus?.status ?: "Not synced")
+            )
+        )
+
+        StatusMessage(error = state.healthError, message = state.healthMessage)
+
         ActionCard(
-            title = "Planned data flow",
-            body = "Galaxy Fit3 -> Samsung Health -> Health Connect -> FitTrack local summary."
+            title = "Data flow",
+            body = "Galaxy Fit3 -> Samsung Health -> Health Connect -> FitTrack local summary.\n\nIf Samsung Health has not synced your band yet, FitTrack will also show old or empty data."
         )
-        EmptyStateCard(
-            title = "No Health Connect sync yet",
-            body = "This phase keeps the app offline and safe while the shell settles.",
-            icon = Icons.Filled.Favorite
-        )
+
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Permissions and sync", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = when {
+                        state.healthAvailability != HealthConnectAvailability.Available ->
+                            "Health Connect must be installed/available before FitTrack can request access."
+                        missingPermissions > 0 ->
+                            "$missingPermissions permissions still need approval."
+                        else ->
+                            "All requested Health Connect read permissions are approved."
+                    },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = onRequestPermissions,
+                        enabled = state.healthAvailability == HealthConnectAvailability.Available,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Allow access")
+                    }
+                    Button(
+                        onClick = onSyncToday,
+                        enabled = !state.isHealthSyncing &&
+                            state.healthAvailability == HealthConnectAvailability.Available &&
+                            missingPermissions <= 0,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (state.isHealthSyncing) "Syncing" else "Sync today")
+                    }
+                }
+                TextButton(onClick = onRefresh, modifier = Modifier.align(Alignment.End)) {
+                    Text("Refresh status")
+                }
+            }
+        }
+
+        if (summary == null) {
+            EmptyStateCard(
+                title = "No Health Connect summary yet",
+                body = "Approve permissions, open Samsung Health once to sync your wearable, then tap Sync today.",
+                icon = Icons.Filled.Favorite
+            )
+        } else {
+            MetricGrid(
+                items = listOf(
+                    "Steps" to (summary.steps?.toString() ?: "No data"),
+                    "Sleep" to (summary.sleepMinutes?.formatMinutes() ?: "No data"),
+                    "Exercise" to (summary.exerciseMinutes?.formatMinutes() ?: "No data"),
+                    "Active kcal" to (summary.activeCalories?.formatOne() ?: "No data"),
+                    "Total kcal" to (summary.totalCaloriesBurned?.formatOne() ?: "No data"),
+                    "Weight" to (summary.weightKg?.let { "${it.formatOne()} kg" } ?: "No data"),
+                    "Height" to (summary.heightCm?.let { "${it.formatOne()} cm" } ?: "No data"),
+                    "Source" to summary.sourceLabel
+                )
+            )
+        }
     }
 }
 
@@ -1010,6 +1115,18 @@ private fun StatusMessage(error: String?, message: String?) {
 }
 
 private fun Double.formatOne(): String = "%,.1f".format(this)
+
+private fun Long.formatMinutes(): String {
+    val hours = this / 60
+    val minutes = this % 60
+    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+}
+
+private fun Long.formatSyncTime(): String {
+    return DateTimeFormatter.ofPattern("MMM d, HH:mm")
+        .withZone(ZoneId.systemDefault())
+        .format(Instant.ofEpochMilli(this))
+}
 
 @Preview(showBackground = true)
 @Composable

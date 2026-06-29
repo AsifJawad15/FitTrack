@@ -77,3 +77,23 @@ data class MealLog(
     val fat: Double,
     val amountLabel: String = "$grams g"
 )
+
+data class HealthDailySummary(
+    val date: LocalDate,
+    val sourceLabel: String,
+    val steps: Long?,
+    val sleepMinutes: Long?,
+    val exerciseMinutes: Long?,
+    val activeCalories: Double?,
+    val totalCaloriesBurned: Double?,
+    val weightKg: Double?,
+    val heightCm: Double?,
+    val isPending: Boolean,
+    val lastSyncEpochMillis: Long
+)
+
+data class SyncStatus(
+    val lastSyncEpochMillis: Long,
+    val status: String,
+    val errorMessage: String?
+)

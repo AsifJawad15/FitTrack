@@ -7,13 +7,17 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import android.app.Application
 import com.asifjawad.fittrack.FitTrackApplication
+import com.asifjawad.fittrack.data.health.HealthConnectAvailability
+import com.asifjawad.fittrack.data.health.HealthConnectManager
 import com.asifjawad.fittrack.domain.model.ActivityLevel
 import com.asifjawad.fittrack.domain.model.FoodItem
+import com.asifjawad.fittrack.domain.model.HealthDailySummary
 import com.asifjawad.fittrack.domain.model.MealLog
 import com.asifjawad.fittrack.domain.model.MealType
 import com.asifjawad.fittrack.domain.model.RecipeIngredientInput
 import com.asifjawad.fittrack.domain.model.RecipeSummary
 import com.asifjawad.fittrack.domain.model.Sex
+import com.asifjawad.fittrack.domain.model.SyncStatus
 import com.asifjawad.fittrack.domain.model.UserProfile
 import com.asifjawad.fittrack.domain.model.UserProfileDraft
 import com.asifjawad.fittrack.domain.model.WaistLog
@@ -28,6 +32,7 @@ class FitTrackViewModel(application: Application) : AndroidViewModel(application
     private val profileRepository = app.appContainer.profileRepository
     private val measurementRepository = app.appContainer.measurementRepository
     private val nutritionRepository = app.appContainer.nutritionRepository
+    private val healthRepository = app.appContainer.healthRepository
 
     private val today = LocalDate.now()
 
@@ -77,6 +82,20 @@ class FitTrackViewModel(application: Application) : AndroidViewModel(application
                 uiState = uiState.copy(mealsToday = meals)
             }
         }
+
+        viewModelScope.launch {
+            healthRepository.observeDailySummary(today).collectLatest { summary ->
+                uiState = uiState.copy(healthSummary = summary)
+            }
+        }
+
+        viewModelScope.launch {
+            healthRepository.observeSyncState().collectLatest { status ->
+                uiState = uiState.copy(healthSyncStatus = status)
+            }
+        }
+
+        refreshHealthConnectStatus()
     }
 
     fun selectTab(tab: FitTrackTab) {
@@ -380,6 +399,40 @@ class FitTrackViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun refreshHealthConnectStatus() {
+        viewModelScope.launch {
+            val availability = healthRepository.availability()
+            val granted = if (availability == HealthConnectAvailability.Available) {
+                healthRepository.grantedPermissions()
+            } else {
+                emptySet()
+            }
+            uiState = uiState.copy(
+                healthAvailability = availability,
+                healthGrantedPermissions = granted,
+                healthError = when (availability) {
+                    HealthConnectAvailability.Available -> null
+                    HealthConnectAvailability.ProviderUpdateRequired -> "Health Connect needs an update before sync can work."
+                    HealthConnectAvailability.Unavailable -> "Health Connect is unavailable on this device."
+                },
+                healthMessage = null
+            )
+        }
+    }
+
+    fun syncTodayHealthConnect() {
+        viewModelScope.launch {
+            uiState = uiState.copy(isHealthSyncing = true, healthError = null, healthMessage = null)
+            val result = healthRepository.syncDate(today)
+            uiState = uiState.copy(
+                isHealthSyncing = false,
+                healthMessage = result.getOrNull()?.let { "Health Connect synced for ${it.date}." },
+                healthError = result.exceptionOrNull()?.message
+            )
+            refreshHealthConnectStatus()
+        }
+    }
+
     private fun UserProfile.toDraft(): UserProfileDraft {
         return UserProfileDraft(
             age = age.toString(),
@@ -441,8 +494,17 @@ data class FitTrackUiState(
     val recipes: List<RecipeSummary> = emptyList(),
     val mealsToday: List<MealLog> = emptyList(),
     val weightLogs: List<WeightLog> = emptyList(),
-    val waistLogs: List<WaistLog> = emptyList()
+    val waistLogs: List<WaistLog> = emptyList(),
+    val healthAvailability: HealthConnectAvailability = HealthConnectAvailability.Unavailable,
+    val healthGrantedPermissions: Set<String> = emptySet(),
+    val healthSummary: HealthDailySummary? = null,
+    val healthSyncStatus: SyncStatus? = null,
+    val isHealthSyncing: Boolean = false,
+    val healthError: String? = null,
+    val healthMessage: String? = null
 )
+
+val requiredHealthPermissions: Set<String> = HealthConnectManager.PERMISSIONS
 
 data class PendingRecipeIngredient(
     val foodId: Long,
