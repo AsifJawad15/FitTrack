@@ -49,13 +49,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.asifjawad.fittrack.domain.calculation.ProgressEngine
 import com.asifjawad.fittrack.domain.model.ActivityLevel
+import com.asifjawad.fittrack.domain.model.MealType
 import com.asifjawad.fittrack.domain.model.Sex
 import com.asifjawad.fittrack.domain.model.UserProfile
 import com.asifjawad.fittrack.domain.model.UserProfileDraft
 import com.asifjawad.fittrack.ui.theme.FittrackTheme
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 
 @Composable
 fun FitTrackApp(
@@ -91,9 +92,24 @@ fun FitTrackApp(
                 )
             } else {
                 when (state.selectedTab) {
-                    FitTrackTab.Dashboard -> DashboardScreen(profile)
-                    FitTrackTab.Food -> FoodScreen()
-                    FitTrackTab.Progress -> ProgressScreen(profile)
+                    FitTrackTab.Dashboard -> DashboardScreen(profile = profile, state = state)
+                    FitTrackTab.Food -> FoodScreen(
+                        state = state,
+                        onFoodNameChange = viewModel::updateFoodName,
+                        onFoodCaloriesChange = viewModel::updateFoodCalories,
+                        onAddFood = viewModel::addCustomFood,
+                        onMealGramsChange = viewModel::updateMealGrams,
+                        onMealTypeChange = viewModel::setMealType,
+                        onLogMeal = viewModel::logMeal
+                    )
+                    FitTrackTab.Progress -> ProgressScreen(
+                        profile = profile,
+                        state = state,
+                        onWeightChange = viewModel::updateWeightInput,
+                        onWaistChange = viewModel::updateWaistInput,
+                        onSaveWeight = viewModel::addWeightLog,
+                        onSaveWaist = viewModel::addWaistLog
+                    )
                     FitTrackTab.Health -> HealthScreen()
                     FitTrackTab.Settings -> SettingsScreen(
                         draft = state.profileDraft,
@@ -280,14 +296,19 @@ private fun ProfileFields(
 }
 
 @Composable
-private fun DashboardScreen(profile: UserProfile) {
-    val daysRemaining = ChronoUnit.DAYS.between(LocalDate.now(), profile.goalDate).coerceAtLeast(0)
-    val plannedLoss = profile.startWeightKg - profile.targetWeightKg
+private fun DashboardScreen(profile: UserProfile, state: FitTrackUiState) {
+    val metrics = ProgressEngine.calculate(
+        profile = profile,
+        weightLogs = state.weightLogs,
+        mealsToday = state.mealsToday
+    )
+    val scoreLabel = metrics.trajectoryScore?.let { "${it.formatOne()}% trajectory" } ?: "Trajectory pending"
+    val trendLabel = metrics.trendWeightKg?.let { "${it.formatOne()} kg" } ?: "Log weight"
 
     ScreenColumn {
         ScreenHeader(
             title = "Dashboard",
-            subtitle = "A control panel for the 80 kg target."
+            subtitle = "A calculation-first control panel for the goal you set."
         )
 
         ElevatedCard(
@@ -301,12 +322,12 @@ private fun DashboardScreen(profile: UserProfile) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "${plannedLoss.formatOne()} kg to lose",
+                    text = scoreLabel,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "$daysRemaining days remaining. Phase 3 will replace this with trend math and trajectory score.",
+                    text = "${metrics.daysRemaining} days remaining. ${metrics.recommendation}",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -314,54 +335,259 @@ private fun DashboardScreen(profile: UserProfile) {
 
         MetricGrid(
             items = listOf(
-                "Start" to "${profile.startWeightKg.formatOne()} kg",
-                "Target" to "${profile.targetWeightKg.formatOne()} kg",
-                "Height" to "${profile.heightCm.formatOne()} cm",
-                "Activity" to profile.activityLevel.label
+                "Trend weight" to trendLabel,
+                "Planned today" to "${metrics.plannedWeightKg.formatOne()} kg",
+                "Calories today" to "${metrics.caloriesIn.formatOne()} kcal",
+                "Food target" to "${metrics.dailyPlan.foodCalorieTarget.formatOne()} kcal",
+                "Exercise target" to "${metrics.dailyPlan.plannedExerciseCalories.formatOne()} kcal",
+                "BMR" to "${metrics.bmr.formatOne()} kcal",
+                "TDEE" to "${metrics.tdee.formatOne()} kcal",
+                "Energy gap" to "${metrics.estimatedEnergyGap.formatOne()} kcal",
+                "Goal adjustment" to "${metrics.requiredDailyEnergyAdjustment.formatOne()} kcal"
             )
         )
 
         ActionCard(
-            title = "Next build step",
-            body = "Phase 2 will make these profile and log values survive app restart with Room."
+            title = metrics.dailyPlan.label,
+            body = metrics.dailyPlan.note + "\n\n" + metrics.formulaLines.take(5).joinToString(separator = "\n\n") { line ->
+                "${line.label}: ${line.result}"
+            }
         )
     }
 }
 
 @Composable
-private fun FoodScreen() {
+private fun FoodScreen(
+    state: FitTrackUiState,
+    onFoodNameChange: (String) -> Unit,
+    onFoodCaloriesChange: (String) -> Unit,
+    onAddFood: () -> Unit,
+    onMealGramsChange: (String) -> Unit,
+    onMealTypeChange: (MealType) -> Unit,
+    onLogMeal: (Long) -> Unit
+) {
     ScreenColumn {
         ScreenHeader(
             title = "Food",
-            subtitle = "Manual food logging starts in Phase 2, then faster meal workflows arrive in Phase 4."
+            subtitle = "Add local foods and log meals quickly without internet or Health Connect."
         )
-        EmptyStateCard(
-            title = "No meals logged yet",
-            body = "The first local database pass will add foods, meals, recipes, and daily totals.",
-            icon = Icons.Filled.Add
-        )
+
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Add food", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = state.foodNameInput,
+                    onValueChange = onFoodNameChange,
+                    label = { Text("Food name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = state.foodCaloriesInput,
+                    onValueChange = onFoodCaloriesChange,
+                    label = { Text("Calories per 100g") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                StatusMessage(error = state.foodError, message = state.foodMessage)
+                Button(onClick = onAddFood, modifier = Modifier.fillMaxWidth()) {
+                    Text("Save food")
+                }
+            }
+        }
+
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Log meal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = state.mealGramsInput,
+                    onValueChange = onMealGramsChange,
+                    label = { Text("Grams") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MealType.entries.forEach { mealType ->
+                        FilterChip(
+                            selected = state.selectedMealType == mealType,
+                            onClick = { onMealTypeChange(mealType) },
+                            label = { Text(mealType.label) }
+                        )
+                    }
+                }
+                StatusMessage(error = state.mealError, message = state.mealMessage)
+            }
+        }
+
+        if (state.foods.isEmpty()) {
+            EmptyStateCard(
+                title = "No foods yet",
+                body = "Add a food above to start meal logging.",
+                icon = Icons.Filled.Add
+            )
+        } else {
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Food list", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    state.foods.take(12).forEach { food ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(food.name, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    text = "${food.caloriesPer100g.formatOne()} kcal/100g",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = { onLogMeal(food.id) }) {
+                                Text("Log")
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+
+        if (state.mealsToday.isNotEmpty()) {
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Today", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    state.mealsToday.take(10).forEach { meal ->
+                        Text(
+                            text = "${meal.mealType.label}: ${meal.displayName} (${meal.grams.formatOne()} g, ${meal.calories.formatOne()} kcal)",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun ProgressScreen(profile: UserProfile) {
+private fun ProgressScreen(
+    profile: UserProfile,
+    state: FitTrackUiState,
+    onWeightChange: (String) -> Unit,
+    onWaistChange: (String) -> Unit,
+    onSaveWeight: () -> Unit,
+    onSaveWaist: () -> Unit
+) {
+    val metrics = ProgressEngine.calculate(
+        profile = profile,
+        weightLogs = state.weightLogs,
+        mealsToday = state.mealsToday
+    )
+
     ScreenColumn {
         ScreenHeader(
             title = "Progress",
-            subtitle = "Goal timeline and trend weight will land after the calculation engine."
+            subtitle = "Track manual measurements and audit the formulas behind the dashboard."
         )
+
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = state.weightInput,
+                    onValueChange = onWeightChange,
+                    label = { Text("Weight (kg)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(onClick = onSaveWeight, modifier = Modifier.fillMaxWidth()) {
+                    Text("Save weight")
+                }
+                OutlinedTextField(
+                    value = state.waistInput,
+                    onValueChange = onWaistChange,
+                    label = { Text("Waist (cm)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(onClick = onSaveWaist, modifier = Modifier.fillMaxWidth()) {
+                    Text("Save waist")
+                }
+                StatusMessage(error = state.measurementError, message = state.measurementMessage)
+            }
+        }
+
         MetricGrid(
             items = listOf(
                 "Goal date" to profile.goalDate.toString(),
-                "Loss goal" to "${(profile.startWeightKg - profile.targetWeightKg).formatOne()} kg",
-                "Sex" to profile.sex.label,
-                "BMR basis" to "Mifflin-St Jeor"
+                "Weight change" to "${(profile.targetWeightKg - profile.startWeightKg).formatOne()} kg",
+                "Trajectory" to (metrics.trajectoryScore?.let { "${it.formatOne()}%" } ?: "Pending"),
+                "Entries" to "${state.weightLogs.size} weight / ${state.waistLogs.size} waist"
             )
         )
+
         ActionCard(
-            title = "Accuracy rule",
-            body = "The app will show formulas and assumptions instead of hiding health calculations."
+            title = "Calculation Details",
+            body = metrics.formulaLines.joinToString(separator = "\n\n") { line ->
+                "${line.label}\n${line.formula}\n= ${line.result}"
+            }
         )
+
+        if (state.weightLogs.isNotEmpty()) {
+            ActionCard(
+                title = "Recent weight logs",
+                body = state.weightLogs.take(5).joinToString(separator = "\n") {
+                    "${it.date}: ${it.weightKg.formatOne()} kg"
+                }
+            )
+        }
+
+        if (state.waistLogs.isNotEmpty()) {
+            ActionCard(
+                title = "Recent waist logs",
+                body = state.waistLogs.take(5).joinToString(separator = "\n") {
+                    "${it.date}: ${it.waistCm.formatOne()} cm"
+                }
+            )
+        }
     }
 }
 
@@ -395,7 +621,7 @@ private fun SettingsScreen(
     ScreenColumn {
         ScreenHeader(
             title = "Settings",
-            subtitle = "Edit the current profile inputs. Persistence arrives in Phase 2."
+            subtitle = "Edit and persist profile inputs in the local Room database."
         )
         ProfileFields(draft = draft, onDraftChange = onDraftChange)
         StatusMessage(error = error, message = message)
@@ -572,7 +798,8 @@ private fun FitTrackAppPreview() {
                 targetWeightKg = 80.0,
                 goalDate = LocalDate.now().plusMonths(3),
                 activityLevel = ActivityLevel.Light
-            )
+            ),
+            state = FitTrackUiState()
         )
     }
 }
