@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
@@ -56,6 +57,14 @@ interface FoodDao {
 interface RecipeDao {
     @Query("SELECT * FROM recipes ORDER BY name COLLATE NOCASE ASC")
     fun observeRecipes(): Flow<List<RecipeEntity>>
+
+    @Transaction
+    @Query("SELECT * FROM recipes ORDER BY updatedAtEpochMillis DESC")
+    fun observeRecipesWithIngredients(): Flow<List<RecipeWithIngredientsEntity>>
+
+    @Transaction
+    @Query("SELECT * FROM recipes WHERE id = :id")
+    suspend fun getRecipeWithIngredients(id: Long): RecipeWithIngredientsEntity?
 
     @Insert
     suspend fun insertRecipe(entity: RecipeEntity): Long

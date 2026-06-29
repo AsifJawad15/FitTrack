@@ -95,12 +95,24 @@ fun FitTrackApp(
                     FitTrackTab.Dashboard -> DashboardScreen(profile = profile, state = state)
                     FitTrackTab.Food -> FoodScreen(
                         state = state,
+                        onFoodSearchChange = viewModel::updateFoodSearch,
                         onFoodNameChange = viewModel::updateFoodName,
                         onFoodCaloriesChange = viewModel::updateFoodCalories,
+                        onFoodProteinChange = viewModel::updateFoodProtein,
+                        onFoodCarbsChange = viewModel::updateFoodCarbs,
+                        onFoodFatChange = viewModel::updateFoodFat,
                         onAddFood = viewModel::addCustomFood,
                         onMealGramsChange = viewModel::updateMealGrams,
                         onMealTypeChange = viewModel::setMealType,
-                        onLogMeal = viewModel::logMeal
+                        onLogMeal = viewModel::logMeal,
+                        onRecipeNameChange = viewModel::updateRecipeName,
+                        onRecipeServingsChange = viewModel::updateRecipeServings,
+                        onRecipeIngredientGramsChange = viewModel::updateRecipeIngredientGrams,
+                        onAddRecipeIngredient = viewModel::addRecipeIngredient,
+                        onRemoveRecipeIngredient = viewModel::removeRecipeIngredient,
+                        onSaveRecipe = viewModel::saveRecipe,
+                        onRecipeLogServingsChange = viewModel::updateRecipeLogServings,
+                        onLogRecipe = viewModel::logRecipe
                     )
                     FitTrackTab.Progress -> ProgressScreen(
                         profile = profile,
@@ -359,17 +371,51 @@ private fun DashboardScreen(profile: UserProfile, state: FitTrackUiState) {
 @Composable
 private fun FoodScreen(
     state: FitTrackUiState,
+    onFoodSearchChange: (String) -> Unit,
     onFoodNameChange: (String) -> Unit,
     onFoodCaloriesChange: (String) -> Unit,
+    onFoodProteinChange: (String) -> Unit,
+    onFoodCarbsChange: (String) -> Unit,
+    onFoodFatChange: (String) -> Unit,
     onAddFood: () -> Unit,
     onMealGramsChange: (String) -> Unit,
     onMealTypeChange: (MealType) -> Unit,
-    onLogMeal: (Long) -> Unit
+    onLogMeal: (Long) -> Unit,
+    onRecipeNameChange: (String) -> Unit,
+    onRecipeServingsChange: (String) -> Unit,
+    onRecipeIngredientGramsChange: (String) -> Unit,
+    onAddRecipeIngredient: (Long) -> Unit,
+    onRemoveRecipeIngredient: (Int) -> Unit,
+    onSaveRecipe: () -> Unit,
+    onRecipeLogServingsChange: (String) -> Unit,
+    onLogRecipe: (Long) -> Unit
 ) {
+    val filteredFoods = state.foods.filter { food ->
+        state.foodSearchInput.isBlank() || food.name.contains(state.foodSearchInput, ignoreCase = true)
+    }
+    val dailyCalories = state.mealsToday.sumOf { it.calories }
+    val dailyProtein = state.mealsToday.sumOf { it.protein }
+    val dailyCarbs = state.mealsToday.sumOf { it.carbs }
+    val dailyFat = state.mealsToday.sumOf { it.fat }
+    val recipeCalories = state.recipeIngredients.sumOf { it.calories }
+    val recipeProtein = state.recipeIngredients.sumOf { it.protein }
+    val recipeCarbs = state.recipeIngredients.sumOf { it.carbs }
+    val recipeFat = state.recipeIngredients.sumOf { it.fat }
+    val recipeServings = state.recipeServingsInput.toDoubleOrNull()?.takeIf { it > 0.0 } ?: 1.0
+
     ScreenColumn {
         ScreenHeader(
             title = "Food",
-            subtitle = "Add local foods and log meals quickly without internet or Health Connect."
+            subtitle = "Search foods, build family recipes, and log meals without internet."
+        )
+
+        MetricGrid(
+            items = listOf(
+                "Calories" to "${dailyCalories.formatOne()} kcal",
+                "Protein" to "${dailyProtein.formatOne()} g",
+                "Carbs" to "${dailyCarbs.formatOne()} g",
+                "Fat" to "${dailyFat.formatOne()} g"
+            )
         )
 
         ElevatedCard(
@@ -381,7 +427,7 @@ private fun FoodScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("Add food", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Add custom food", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(
                     value = state.foodNameInput,
                     onValueChange = onFoodNameChange,
@@ -389,14 +435,42 @@ private fun FoodScreen(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
-                OutlinedTextField(
-                    value = state.foodCaloriesInput,
-                    onValueChange = onFoodCaloriesChange,
-                    label = { Text("Calories per 100g") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = state.foodCaloriesInput,
+                        onValueChange = onFoodCaloriesChange,
+                        label = { Text("Kcal/100g") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = state.foodProteinInput,
+                        onValueChange = onFoodProteinChange,
+                        label = { Text("Protein") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = state.foodCarbsInput,
+                        onValueChange = onFoodCarbsChange,
+                        label = { Text("Carbs") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = state.foodFatInput,
+                        onValueChange = onFoodFatChange,
+                        label = { Text("Fat") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
                 StatusMessage(error = state.foodError, message = state.foodMessage)
                 Button(onClick = onAddFood, modifier = Modifier.fillMaxWidth()) {
                     Text("Save food")
@@ -413,11 +487,19 @@ private fun FoodScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("Log meal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("Fast log setup", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(
                     value = state.mealGramsInput,
                     onValueChange = onMealGramsChange,
-                    label = { Text("Grams") },
+                    label = { Text("Food grams") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = state.recipeLogServingsInput,
+                    onValueChange = onRecipeLogServingsChange,
+                    label = { Text("Recipe servings") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
@@ -432,6 +514,26 @@ private fun FoodScreen(
                     }
                 }
                 StatusMessage(error = state.mealError, message = state.mealMessage)
+            }
+        }
+
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Food search", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = state.foodSearchInput,
+                    onValueChange = onFoodSearchChange,
+                    label = { Text("Search saved foods") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
             }
         }
 
@@ -452,7 +554,7 @@ private fun FoodScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text("Food list", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    state.foods.take(12).forEach { food ->
+                    filteredFoods.take(12).forEach { food ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -461,12 +563,136 @@ private fun FoodScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(food.name, style = MaterialTheme.typography.bodyLarge)
                                 Text(
-                                    text = "${food.caloriesPer100g.formatOne()} kcal/100g",
+                                    text = "${food.caloriesPer100g.formatOne()} kcal, P ${food.proteinPer100g.formatOne()} / C ${food.carbsPer100g.formatOne()} / F ${food.fatPer100g.formatOne()} per 100g",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             TextButton(onClick = { onLogMeal(food.id) }) {
+                                Text("Log")
+                            }
+                        }
+                        HorizontalDivider()
+                    }
+                }
+            }
+        }
+
+        ElevatedCard(
+            colors = CardDefaults.elevatedCardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Recipe builder", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                OutlinedTextField(
+                    value = state.recipeNameInput,
+                    onValueChange = onRecipeNameChange,
+                    label = { Text("Recipe name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = state.recipeServingsInput,
+                        onValueChange = onRecipeServingsChange,
+                        label = { Text("Total servings") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = state.recipeIngredientGramsInput,
+                        onValueChange = onRecipeIngredientGramsChange,
+                        label = { Text("Ingredient grams") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+                Text(
+                    text = "Tap Add beside a food to include it in this recipe.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                filteredFoods.take(8).forEach { food ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(food.name, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { onAddRecipeIngredient(food.id) }) {
+                            Text("Add")
+                        }
+                    }
+                }
+                if (state.recipeIngredients.isNotEmpty()) {
+                    HorizontalDivider()
+                    state.recipeIngredients.forEachIndexed { index, ingredient ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("${ingredient.name} - ${ingredient.grams.formatOne()} g")
+                                Text(
+                                    text = "${ingredient.calories.formatOne()} kcal",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = { onRemoveRecipeIngredient(index) }) {
+                                Text("Remove")
+                            }
+                        }
+                    }
+                    MetricGrid(
+                        items = listOf(
+                            "Batch kcal" to recipeCalories.formatOne(),
+                            "Per serving" to (recipeCalories / recipeServings).formatOne(),
+                            "Protein" to "${recipeProtein.formatOne()} g",
+                            "Carbs/Fat" to "${recipeCarbs.formatOne()} / ${recipeFat.formatOne()} g"
+                        )
+                    )
+                }
+                StatusMessage(error = state.recipeError, message = state.recipeMessage)
+                Button(onClick = onSaveRecipe, modifier = Modifier.fillMaxWidth()) {
+                    Text("Save recipe")
+                }
+            }
+        }
+
+        if (state.recipes.isNotEmpty()) {
+            ElevatedCard(
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Recipes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    state.recipes.take(10).forEach { recipe ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(recipe.name, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    text = "${recipe.caloriesPerServing.formatOne()} kcal/serving, ${recipe.ingredients.size} ingredients",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = { onLogRecipe(recipe.id) }) {
                                 Text("Log")
                             }
                         }
@@ -489,7 +715,7 @@ private fun FoodScreen(
                     Text("Today", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     state.mealsToday.take(10).forEach { meal ->
                         Text(
-                            text = "${meal.mealType.label}: ${meal.displayName} (${meal.grams.formatOne()} g, ${meal.calories.formatOne()} kcal)",
+                            text = "${meal.mealType.label}: ${meal.displayName} (${meal.amountLabel}, ${meal.calories.formatOne()} kcal)",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }

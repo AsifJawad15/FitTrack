@@ -1,9 +1,11 @@
 package com.asifjawad.fittrack.data.local
 
+import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import androidx.room.Relation
 
 @Entity(tableName = "user_profile")
 data class UserProfileEntity(
@@ -94,6 +96,15 @@ data class RecipeIngredientEntity(
     val protein: Double,
     val carbs: Double,
     val fat: Double
+)
+
+data class RecipeWithIngredientsEntity(
+    @Embedded val recipe: RecipeEntity,
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "recipeId"
+    )
+    val ingredients: List<RecipeIngredientEntity>
 )
 
 @Entity(

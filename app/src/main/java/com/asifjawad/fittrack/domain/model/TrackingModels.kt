@@ -33,6 +33,38 @@ data class FoodItem(
     val isSeed: Boolean
 )
 
+data class RecipeIngredient(
+    val id: Long,
+    val foodItemId: Long?,
+    val name: String,
+    val grams: Double,
+    val calories: Double,
+    val protein: Double,
+    val carbs: Double,
+    val fat: Double
+)
+
+data class RecipeSummary(
+    val id: Long,
+    val name: String,
+    val servings: Double,
+    val totalCalories: Double,
+    val totalProtein: Double,
+    val totalCarbs: Double,
+    val totalFat: Double,
+    val ingredients: List<RecipeIngredient>
+) {
+    val caloriesPerServing: Double = totalCalories / servings
+    val proteinPerServing: Double = totalProtein / servings
+    val carbsPerServing: Double = totalCarbs / servings
+    val fatPerServing: Double = totalFat / servings
+}
+
+data class RecipeIngredientInput(
+    val foodId: Long,
+    val grams: Double
+)
+
 data class MealLog(
     val id: Long,
     val date: LocalDate,
@@ -42,5 +74,6 @@ data class MealLog(
     val calories: Double,
     val protein: Double,
     val carbs: Double,
-    val fat: Double
+    val fat: Double,
+    val amountLabel: String = "$grams g"
 )

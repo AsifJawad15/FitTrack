@@ -29,6 +29,7 @@ data class AppContainer(
     val nutritionRepository: NutritionRepository by lazy {
         NutritionRepository(
             foodDao = database.foodDao(),
+            recipeDao = database.recipeDao(),
             mealDao = database.mealLogDao()
         )
     }

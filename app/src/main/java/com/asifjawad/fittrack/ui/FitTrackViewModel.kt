@@ -11,6 +11,8 @@ import com.asifjawad.fittrack.domain.model.ActivityLevel
 import com.asifjawad.fittrack.domain.model.FoodItem
 import com.asifjawad.fittrack.domain.model.MealLog
 import com.asifjawad.fittrack.domain.model.MealType
+import com.asifjawad.fittrack.domain.model.RecipeIngredientInput
+import com.asifjawad.fittrack.domain.model.RecipeSummary
 import com.asifjawad.fittrack.domain.model.Sex
 import com.asifjawad.fittrack.domain.model.UserProfile
 import com.asifjawad.fittrack.domain.model.UserProfileDraft
@@ -61,6 +63,12 @@ class FitTrackViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             nutritionRepository.observeFoods().collectLatest { foods ->
                 uiState = uiState.copy(foods = foods)
+            }
+        }
+
+        viewModelScope.launch {
+            nutritionRepository.observeRecipes().collectLatest { recipes ->
+                uiState = uiState.copy(recipes = recipes)
             }
         }
 
@@ -138,12 +146,34 @@ class FitTrackViewModel(application: Application) : AndroidViewModel(application
         uiState = uiState.copy(foodCaloriesInput = calories, foodError = null, foodMessage = null)
     }
 
+    fun updateFoodProtein(protein: String) {
+        uiState = uiState.copy(foodProteinInput = protein, foodError = null, foodMessage = null)
+    }
+
+    fun updateFoodCarbs(carbs: String) {
+        uiState = uiState.copy(foodCarbsInput = carbs, foodError = null, foodMessage = null)
+    }
+
+    fun updateFoodFat(fat: String) {
+        uiState = uiState.copy(foodFatInput = fat, foodError = null, foodMessage = null)
+    }
+
+    fun updateFoodSearch(query: String) {
+        uiState = uiState.copy(foodSearchInput = query)
+    }
+
     fun addCustomFood() {
         val name = uiState.foodNameInput.trim()
         val calories = uiState.foodCaloriesInput.toDoubleOrNull()
+        val protein = uiState.foodProteinInput.toDoubleOrNull() ?: 0.0
+        val carbs = uiState.foodCarbsInput.toDoubleOrNull() ?: 0.0
+        val fat = uiState.foodFatInput.toDoubleOrNull() ?: 0.0
         val error = when {
             name.isBlank() -> "Enter a food name."
             calories == null || calories !in 1.0..900.0 -> "Enter calories per 100g (1-900)."
+            protein !in 0.0..100.0 -> "Protein per 100g should be 0-100."
+            carbs !in 0.0..100.0 -> "Carbs per 100g should be 0-100."
+            fat !in 0.0..100.0 -> "Fat per 100g should be 0-100."
             else -> null
         }
         if (error != null) {
@@ -152,10 +182,19 @@ class FitTrackViewModel(application: Application) : AndroidViewModel(application
         }
 
         viewModelScope.launch {
-            nutritionRepository.addCustomFood(name = name, caloriesPer100g = calories!!)
+            nutritionRepository.addCustomFood(
+                name = name,
+                caloriesPer100g = calories!!,
+                proteinPer100g = protein,
+                carbsPer100g = carbs,
+                fatPer100g = fat
+            )
             uiState = uiState.copy(
                 foodNameInput = "",
                 foodCaloriesInput = "",
+                foodProteinInput = "",
+                foodCarbsInput = "",
+                foodFatInput = "",
                 foodError = null,
                 foodMessage = "Food added to local database."
             )
@@ -187,6 +226,116 @@ class FitTrackViewModel(application: Application) : AndroidViewModel(application
             uiState = uiState.copy(
                 mealError = if (success) null else "Food item not found.",
                 mealMessage = if (success) "Meal logged for today." else null
+            )
+        }
+    }
+
+    fun updateRecipeName(name: String) {
+        uiState = uiState.copy(recipeNameInput = name, recipeError = null, recipeMessage = null)
+    }
+
+    fun updateRecipeServings(servings: String) {
+        uiState = uiState.copy(recipeServingsInput = servings, recipeError = null, recipeMessage = null)
+    }
+
+    fun updateRecipeIngredientGrams(grams: String) {
+        uiState = uiState.copy(recipeIngredientGramsInput = grams, recipeError = null, recipeMessage = null)
+    }
+
+    fun addRecipeIngredient(foodId: Long) {
+        val food = uiState.foods.firstOrNull { it.id == foodId }
+        val grams = uiState.recipeIngredientGramsInput.toDoubleOrNull()
+        val error = when {
+            food == null -> "Food item not found."
+            grams == null || grams !in 1.0..5000.0 -> "Enter ingredient grams between 1 and 5000."
+            else -> null
+        }
+        if (error != null) {
+            uiState = uiState.copy(recipeError = error)
+            return
+        }
+
+        val multiplier = grams!! / 100.0
+        uiState = uiState.copy(
+            recipeIngredients = uiState.recipeIngredients + PendingRecipeIngredient(
+                foodId = food!!.id,
+                name = food.name,
+                grams = grams,
+                calories = food.caloriesPer100g * multiplier,
+                protein = food.proteinPer100g * multiplier,
+                carbs = food.carbsPer100g * multiplier,
+                fat = food.fatPer100g * multiplier
+            ),
+            recipeIngredientGramsInput = "",
+            recipeError = null,
+            recipeMessage = "${food.name} added to recipe."
+        )
+    }
+
+    fun removeRecipeIngredient(index: Int) {
+        uiState = uiState.copy(
+            recipeIngredients = uiState.recipeIngredients.filterIndexed { currentIndex, _ ->
+                currentIndex != index
+            },
+            recipeError = null,
+            recipeMessage = null
+        )
+    }
+
+    fun saveRecipe() {
+        val name = uiState.recipeNameInput.trim()
+        val servings = uiState.recipeServingsInput.toDoubleOrNull()
+        val error = when {
+            name.isBlank() -> "Enter a recipe name."
+            servings == null || servings !in 0.25..100.0 -> "Enter total servings between 0.25 and 100."
+            uiState.recipeIngredients.isEmpty() -> "Add at least one ingredient."
+            else -> null
+        }
+        if (error != null) {
+            uiState = uiState.copy(recipeError = error)
+            return
+        }
+
+        viewModelScope.launch {
+            val success = nutritionRepository.createRecipe(
+                name = name,
+                servings = servings!!,
+                ingredients = uiState.recipeIngredients.map {
+                    RecipeIngredientInput(foodId = it.foodId, grams = it.grams)
+                }
+            )
+            uiState = uiState.copy(
+                recipeNameInput = if (success) "" else uiState.recipeNameInput,
+                recipeServingsInput = if (success) "4" else uiState.recipeServingsInput,
+                recipeIngredientGramsInput = "",
+                recipeIngredients = if (success) emptyList() else uiState.recipeIngredients,
+                recipeError = if (success) null else "Could not save recipe. Check ingredients.",
+                recipeMessage = if (success) "Recipe saved locally." else null
+            )
+        }
+    }
+
+    fun updateRecipeLogServings(servings: String) {
+        uiState = uiState.copy(recipeLogServingsInput = servings, mealError = null, mealMessage = null)
+    }
+
+    fun logRecipe(recipeId: Long) {
+        val servings = uiState.recipeLogServingsInput.toDoubleOrNull()
+        if (servings == null || servings !in 0.05..20.0) {
+            uiState = uiState.copy(mealError = "Enter recipe servings between 0.05 and 20.")
+            return
+        }
+
+        viewModelScope.launch {
+            val success = nutritionRepository.logMealFromRecipe(
+                date = today,
+                mealType = uiState.selectedMealType,
+                recipeId = recipeId,
+                servings = servings
+            )
+            uiState = uiState.copy(
+                mealError = if (success) null else "Recipe not found.",
+                mealMessage = if (success) "Recipe meal logged for today." else null
             )
         }
     }
@@ -267,20 +416,42 @@ data class FitTrackUiState(
     val profileSavedMessage: String? = null,
     val foodNameInput: String = "",
     val foodCaloriesInput: String = "",
+    val foodProteinInput: String = "",
+    val foodCarbsInput: String = "",
+    val foodFatInput: String = "",
+    val foodSearchInput: String = "",
     val foodError: String? = null,
     val foodMessage: String? = null,
     val mealGramsInput: String = "200",
+    val recipeLogServingsInput: String = "1",
     val selectedMealType: MealType = MealType.Lunch,
     val mealError: String? = null,
     val mealMessage: String? = null,
+    val recipeNameInput: String = "",
+    val recipeServingsInput: String = "4",
+    val recipeIngredientGramsInput: String = "",
+    val recipeIngredients: List<PendingRecipeIngredient> = emptyList(),
+    val recipeError: String? = null,
+    val recipeMessage: String? = null,
     val weightInput: String = "",
     val waistInput: String = "",
     val measurementError: String? = null,
     val measurementMessage: String? = null,
     val foods: List<FoodItem> = emptyList(),
+    val recipes: List<RecipeSummary> = emptyList(),
     val mealsToday: List<MealLog> = emptyList(),
     val weightLogs: List<WeightLog> = emptyList(),
     val waistLogs: List<WaistLog> = emptyList()
+)
+
+data class PendingRecipeIngredient(
+    val foodId: Long,
+    val name: String,
+    val grams: Double,
+    val calories: Double,
+    val protein: Double,
+    val carbs: Double,
+    val fat: Double
 )
 
 enum class FitTrackTab(val label: String) {
